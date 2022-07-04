@@ -3,18 +3,27 @@ Parameters:
     Default: 10.0.0.0/16
     Description: Please enter the IP range (CIDR notation) for this VPC
     Type: String
+
   PublicSubnet1CIDR:
     Default: 10.0.0.0/24
     Description: Please enter the IP range (CIDR notation) for the PublicSubnet1
     Type: String
+
   PublicSubnet2CIDR:
     Default: 10.0.1.0/24
-    Description: Please enter the IP range (CIDR notation) for the PublicSubnet2
+    Description: Please enter the IP range (CIDR notation) for the PublicSubnet1
+    Type: String
+
+  WebServerLaunchTemplateName:
+    AllowedPattern: '[a-zA-Z0-9\(\)\.\-/_]+'
+    ConstraintDescription: Must be unique to this account. Max 128 chars. No spaces or special characters like '&', '*', '@'.
+    Default: App-Server-Launch-Template
+    Description: Name of launch template
     Type: String
 
 Resources:
 
-# Create VPC
+# Creating VPC
   VPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -26,7 +35,7 @@ Resources:
         - Key: Name
           Value: VPC
 
-# Create Internet Gateway
+# Creating Internet Gateway
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
@@ -41,7 +50,7 @@ Resources:
       InternetGatewayId: !Ref InternetGateway
       VpcId: !Ref VPC
       
-#Create a Public Subnet
+#Creating a Public Subnet
   PublicSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
@@ -53,7 +62,6 @@ Resources:
           Value: PublicSubnet1
       VpcId: !Ref VPC
 
-  #Create a Public Subnet2
   PublicSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
@@ -65,7 +73,7 @@ Resources:
           Value: PublicSubnet2
       VpcId: !Ref VPC
 
-#Create Route table
+#Creating Route table
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -87,33 +95,8 @@ Resources:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref PublicRouteTable
-      SubnetId: !Ref PublicSubnet1
-
-#Key pair for instance
-
-# Create EC2
-  EC2Instance1:
-    Type: AWS::EC2::Instance
-    Properties:
-      InstanceType: t2.micro
-      ImageId: ami-08df646e18b182346
-      KeyName:  Public 
-      SubnetId : !Ref PublicSubnet1
-      Tags:
-        - Key: Name
-          Value: Instance1
+      SubnetId: !Ref PublicSubnet1      
       
-# Create EC2
-  EC2Instance2:
-    Type: AWS::EC2::Instance
-    Properties:
-      InstanceType: t2.micro
-      ImageId: ami-08df646e18b182346
-      KeyName: Public
-      SubnetId : !Ref PublicSubnet2
-      Tags:
-        - Key: Name
-          Value: Instance2
       
 # Creating Application Load Balancer
   LoadBalancer:
@@ -151,11 +134,95 @@ Resources:
       TargetGroupAttributes:
       - Key: deregistration_delay.timeout_seconds
         Value: '20'
-      Targets:
-      - Id: !Ref EC2Instance1
-        Port: 80
-      - Id: !Ref EC2Instance2
-        Port: 80
+
       UnhealthyThresholdCount: 3
       VpcId: !Ref VPC
-      
+
+#Web Server Launch Template
+  WebServerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Ref WebServerLaunchTemplateName
+      LaunchTemplateData:
+        ImageId: ami-07eaf27c7c4a884cf
+        InstanceType: t2.small
+        KeyName: Public
+        Monitoring:
+          Enabled: true
+
+#Creating Auto Scaling Group  
+
+  WebServerAutoScalingGroup:
+      Type: AWS::AutoScaling::AutoScalingGroup
+      Properties:
+        AutoScalingGroupName: Auto Scaling Group
+        VPCZoneIdentifier:
+              - !Ref PublicSubnet1
+        HealthCheckGracePeriod: 300
+        HealthCheckType: ELB
+        LaunchTemplate:
+          LaunchTemplateName: !Ref WebServerLaunchTemplateName
+          Version: !GetAtt WebServerLaunchTemplate.LatestVersionNumber
+        MinSize: 2
+        MaxSize: 4
+        DesiredCapacity: 2
+        Tags:
+          - Key: Name
+            Value: AS-WebServer
+            PropagateAtLaunch: true
+        TargetGroupARNs:
+          - !Ref EC2TargetGroup
+
+#Scale Up Policy
+  WebServerScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref WebServerAutoScalingGroup
+      Cooldown: 60
+      ScalingAdjustment: 1
+
+
+#Scale Down Policy
+  WebServerScaleDownPolicy:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref WebServerAutoScalingGroup
+      Cooldown: 60
+      ScalingAdjustment: -1
+
+
+  CPUAlarmHigh:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Scale-up if CPU > 90% for 10 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 90
+      AlarmActions:
+        - !Ref WebServerScaleUpPolicy
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref WebServerAutoScalingGroup
+      ComparisonOperator: GreaterThanThreshold
+
+  CPUAlarmLow:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: Scale-down if CPU < 70% for 10 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 70
+      AlarmActions:
+        - !Ref WebServerScaleDownPolicy
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref WebServerAutoScalingGroup
+      ComparisonOperator: LessThanThreshold
