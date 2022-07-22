@@ -22,6 +22,7 @@ sudo apt-get install mysql-server -y
 sudo systemctl start mysql
 sudo systemctl status mysql
 sudo yarn create strapi-app my-project --quickstart
+Ctr + Z
 sudo yarn build
 sudo yarn develop
 sudo wget https://aws-codedeploy-us-east-1.s3.us-east-1.amazonaws.com/latest/install
