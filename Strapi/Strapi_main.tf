@@ -246,9 +246,9 @@ resource "aws_lb_target_group" "strapi-target-group" {
 
 resource "aws_launch_configuration" "strapi-configuration" {
   name = "Strapi-Instance"
-  image_id =  "ami-0500e6cffe668eb27"
+  image_id =  "ami-0729e439b6769d6ab"
   instance_type = "t2.small"
-  key_name        = "Public" # EC2_servers_key
+  key_name        = "strapi" # EC2_servers_key
   security_groups = [aws_security_group.strapi-SG.id]
   associate_public_ip_address = true
   lifecycle {
@@ -282,6 +282,11 @@ resource "aws_autoscaling_group" "strapi_autoscaling_group" {
     aws_subnet.strapi-subnet1.id,
     aws_subnet.strapi-subnet2.id
   ]
+  tag {
+    key                 = "Name"
+    value               = "Strapi-instance"
+    propagate_at_launch = true
+  }
   timeouts {
     delete = "15m" # timeout duration for instances
   }
@@ -543,7 +548,7 @@ resource "aws_codepipeline" "strapi_pipeline" {
       owner     = "ThirdParty"
       provider  = "GitHub"
       run_order = 1
-      version   = "2"
+      version   = "1"
     }
   }
   stage {
@@ -599,40 +604,46 @@ resource "aws_codepipeline" "strapi_pipeline" {
 }
 
 
-#---------------------------------------------------------------------------
-#16 Webhooks for AWS and GitHub, using random secret key
-#---------------------------------------------------------------------------
+# #---------------------------------------------------------------------------
+# #16 Webhooks for AWS and GitHub, using random secret key
+# #---------------------------------------------------------------------------
 
-resource "aws_codepipeline_webhook" "codepipeline_webhook" {
-  authentication  = "GITHUB_HMAC"
-  name            = "codepipeline-webhook"
-  target_action   = "Source"
-  target_pipeline = aws_codepipeline.strapi_pipeline.name
+# resource "aws_codepipeline_webhook" "codepipeline_webhook" {
+#   authentication  = "GITHUB_HMAC"
+#   name            = "codepipeline-webhook"
+#   target_action   = "Source"
+#   target_pipeline = aws_codepipeline.strapi_pipeline.name
 
-  authentication_configuration {
-    secret_token = random_string.github_secret.result
-  }
+#   authentication_configuration {
+#     secret_token = random_string.github_secret.result
+#   }
 
-  filter {
-    json_path    = "$.ref"
-    match_equals = "refs/heads/{Branch}"
-  }
-  tags = {}
-}
+#   filter {
+#     json_path    = "$.ref"
+#     match_equals = "refs/heads/{Branch}"
+#   }
+#   tags = {}
+# }
 
-resource "github_repository_webhook" "github_hook" {
-  repository = "Terraform"
-  events     = ["push"]
+# resource "github_repository_webhook" "github_hook" {
+#   repository = "Terraform"
+#   events     = ["push"]
 
-  configuration {
-    url          = aws_codepipeline_webhook.codepipeline_webhook.url
-    insecure_ssl = "0"
-    content_type = "json"
-    secret       = random_string.github_secret.result
-  }
-}
+#   configuration {
+#     url          = aws_codepipeline_webhook.codepipeline_webhook.url
+#     insecure_ssl = "0"
+#     content_type = "json"
+#     secret       = random_string.github_secret.result
+#   }
+# }
 
-resource "random_string" "github_secret" {
-  length  = 99
-  special = false
+# resource "random_string" "github_secret" {
+#   length  = 99
+#   special = false
+# }
+
+# webhook for github
+resource "aws_codestarconnections_connection" "gitwebhook" {
+  name          = "gitwebhook"
+  provider_type = "GitHub"
 }
